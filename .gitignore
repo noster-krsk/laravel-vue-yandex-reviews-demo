@@ -4,6 +4,7 @@ backend/.env
 backend/.env.backup
 backend/node_modules/
 backend/public/hot
+backend/public/dist
 backend/public/storage
 backend/storage/*.key
 backend/.phpunit.result.cache
