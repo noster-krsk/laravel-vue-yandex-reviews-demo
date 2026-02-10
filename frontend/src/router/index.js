@@ -12,15 +12,22 @@ const router = createRouter({
     },
     {
       path: '/',
-      name: 'reviews',
-      component: () => import('../views/HomeView.vue'),
+      component: () => import('../layouts/AppLayout.vue'),
       meta: { requiresAuth: true },
-    },
-    {
-      path: '/settings',
-      name: 'settings',
-      component: () => import('../views/AboutView.vue'),
-      meta: { requiresAuth: true },
+      children: [
+        {
+          path: '',
+          name: 'reviews',
+          component: () => import('../views/ReviewsView.vue'),
+          meta: { requiresAuth: true, title: 'Отзывы' },
+        },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('../views/SettingsView.vue'),
+          meta: { requiresAuth: true, title: 'Подключение площадок' },
+        },
+      ],
     },
   ],
 })
