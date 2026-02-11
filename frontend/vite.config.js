@@ -3,8 +3,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
-export default defineConfig({
-  base: '/dist/',
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/dist/' : '/',
   plugins: [
     vue(),
     vueDevTools(),
@@ -22,6 +22,11 @@ export default defineConfig({
         target: 'https://test1.one-vpn.ru',
         changeOrigin: true,
         secure: true
+      },
+      '/sanctum': {
+        target: 'https://test1.one-vpn.ru',
+        changeOrigin: true,
+        secure: true
       }
     }
   },
@@ -30,4 +35,4 @@ export default defineConfig({
     outDir: '../backend/public/dist',
     emptyOutDir: true
   }
-})
+}))

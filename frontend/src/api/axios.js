@@ -1,4 +1,5 @@
 import axios from 'axios'
+import router from '@/router'
 
 const api = axios.create({
   baseURL: '/api',
@@ -10,15 +11,10 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
-  const token = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith('XSRF-TOKEN='))
-    ?.split('=')[1]
-
+  const token = localStorage.getItem('auth_token')
   if (token) {
-    config.headers['X-XSRF-TOKEN'] = decodeURIComponent(token)
+    config.headers['Authorization'] = `Bearer ${token}`
   }
-
   return config
 })
 
@@ -26,15 +22,12 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      localStorage.removeItem('auth_token')
       localStorage.removeItem('auth_authenticated')
-      window.location.href = '/dist/login'
+      router.push({ name: 'login' })
     }
     return Promise.reject(error)
   },
 )
-
-export async function getCsrfCookie() {
-  await axios.get('/sanctum/csrf-cookie', { withCredentials: true })
-}
 
 export default api

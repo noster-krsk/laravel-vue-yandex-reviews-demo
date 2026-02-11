@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import api, { getCsrfCookie } from '@/api/axios'
+import api from '@/api/axios'
 
 const yandexUrl = ref('')
 const saved = ref(false)
@@ -25,7 +25,6 @@ async function save() {
   saved.value = false
   loading.value = true
   try {
-    await getCsrfCookie()
     await api.post('/settings', { yandex_url: yandexUrl.value })
     saved.value = true
     setTimeout(() => { saved.value = false }, 3000)
