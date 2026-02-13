@@ -7,6 +7,7 @@ const saved = ref(false)
 const loading = ref(false)
 const loadingPage = ref(true)
 const errors = ref({})
+const parsingRestarted = ref(false)
 
 async function fetchSettings() {
   loadingPage.value = true
@@ -23,11 +24,17 @@ async function fetchSettings() {
 async function save() {
   errors.value = {}
   saved.value = false
+  parsingRestarted.value = false
   loading.value = true
   try {
-    await api.post('/settings', { yandex_url: yandexUrl.value })
+    const { data } = await api.post('/settings', { yandex_url: yandexUrl.value })
     saved.value = true
-    setTimeout(() => { saved.value = false }, 3000)
+    parsingRestarted.value = data.new_parsing_started || false
+
+    setTimeout(() => {
+      saved.value = false
+      parsingRestarted.value = false
+    }, 5000)
   } catch (e) {
     if (e.response?.status === 422) {
       errors.value = e.response.data.errors || {}
@@ -67,7 +74,11 @@ onMounted(fetchSettings)
           {{ loading ? 'Сохранение...' : 'Сохранить' }}
         </button>
 
-        <span v-if="saved" class="saved-msg">Сохранено</span>
+        <span v-if="saved && !parsingRestarted" class="saved-msg">✅ Сохранено</span>
+
+        <div v-if="parsingRestarted" class="restart-msg">
+          🔄 Старый парсинг остановлен, новый запущен. Перейдите на страницу отзывов для просмотра прогресса.
+        </div>
       </form>
     </div>
   </div>
@@ -160,6 +171,17 @@ onMounted(fetchSettings)
   margin-left: 12px;
   font-size: 13px;
   color: #22c55e;
+}
+
+.restart-msg {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #92400e;
+  line-height: 1.5;
 }
 
 .loading {

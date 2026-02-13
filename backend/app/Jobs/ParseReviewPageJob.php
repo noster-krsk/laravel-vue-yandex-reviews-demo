@@ -25,7 +25,7 @@ class ParseReviewPageJob implements ShouldQueue
     public function handle(): void
     {
         $task = ParserTask::find($this->taskId);
-        if (!$task || in_array($task->status, ['completed', 'failed'])) {
+        if (!$task || in_array($task->status, ['completed', 'failed', 'cancelled'])) {
             return;
         }
 
@@ -196,6 +196,15 @@ class ParseReviewPageJob implements ShouldQueue
                     'files' => count($processedFiles), 'db' => $totalInDb, 'waited' => $waited,
                 ]);
             }
+
+            // Проверяем, не отменена ли задача (пользователь сменил URL)
+            if ($waited % 15 === 0) {
+                $task->refresh();
+                if ($task->status === 'cancelled') {
+                    Log::info("ParseReviewPageJob: task cancelled during execution", ['task' => $task->id]);
+                    break;
+                }
+            }
         }
 
         // Убиваем node если ещё жив
@@ -205,6 +214,13 @@ class ParseReviewPageJob implements ShouldQueue
             if (file_exists("/proc/{$pid}")) posix_kill((int)$pid, 9);
         }
         @unlink($pidFile);
+
+        // Если задача была отменена (пользователь сменил URL) — не перезаписываем статус
+        $task->refresh();
+        if ($task->status === 'cancelled') {
+            Log::info("ParseReviewPageJob: task was cancelled, skipping completion", ['task' => $task->id]);
+            return;
+        }
 
         $totalParsed = Review::where('organization_id', $orgId)->count();
         $task->update([
