@@ -9,4 +9,4 @@ Route::get('/', function () {
 // Все остальные не-API роуты тоже отдаем Vue
 Route::get('/{any}', function () {
     return file_get_contents(public_path('dist/index.html'));
-})->where('any', '^(?!api|dist).*$');
+})->where('any', '^(?!api).*$');
