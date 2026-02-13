@@ -13,13 +13,12 @@ const router = createRouter({
     {
       path: '/',
       component: () => import('../layouts/AppLayout.vue'),
-      meta: { requiresAuth: true },
       children: [
         {
           path: '',
           name: 'reviews',
           component: () => import('../views/ReviewsView.vue'),
-          meta: { requiresAuth: true, title: 'Отзывы' },
+          meta: { title: 'Отзывы' },
         },
         {
           path: 'settings',
