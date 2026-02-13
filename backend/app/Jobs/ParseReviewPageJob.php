@@ -11,10 +11,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-/**
- * Парсер отзывов Яндекс.Карт через parse-yandex.js.
- * Запускает node в фоне, поллит файлы на диске и сохраняет отзывы в БД по мере получения.
- */
 class ParseReviewPageJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -38,7 +34,8 @@ class ParseReviewPageJob implements ShouldQueue
         $orgId = $task->organization_id;
         $scriptPath = base_path('scripts/parse-yandex.js');
         $cookieDir = storage_path('app/parser_cookies/' . $orgId);
-        $pidFile = storage_path('app/parser_cookies/' . $orgId . '_pid');
+        $pidFile = $cookieDir . '/node.pid';
+        $nodeLog = $cookieDir . '/node.log';
 
         if (!is_dir($cookieDir)) {
             mkdir($cookieDir, 0755, true);
@@ -50,33 +47,33 @@ class ParseReviewPageJob implements ShouldQueue
         }
         @unlink($cookieDir . '/batch__meta.json');
 
-        Log::info("ParseReviewPageJob: starting parse-yandex.js", [
-            'task' => $task->id, 'org' => $orgId,
-        ]);
+        Log::info("ParseReviewPageJob: starting", ['task' => $task->id, 'org' => $orgId]);
 
-        // Запускаем node в фоне
+        // Запускаем node в фоне — ВАЖНО: >/dev/null 2>&1 чтобы shell_exec не висел
         $cmd = sprintf(
-            'HOME=/tmp TMPDIR=/tmp node %s %s %s %s 2>/dev/null & echo $!',
+            'HOME=/tmp TMPDIR=/tmp nohup node %s %s %s %s > %s 2>&1 & echo $!',
             escapeshellarg($scriptPath),
             escapeshellarg($task->yandex_url),
             escapeshellarg($cookieDir),
-            escapeshellarg('batch_')
+            escapeshellarg('batch_'),
+            escapeshellarg($nodeLog)
         );
 
         $pid = trim(shell_exec($cmd));
         file_put_contents($pidFile, $pid);
-        Log::info("ParseReviewPageJob: started node PID={$pid}");
+        Log::info("ParseReviewPageJob: node started PID={$pid}");
 
-        // Поллим файлы на диске — сканируем ВСЕ файлы каждый цикл
+        // Поллим файлы на диске
         $maxWait = 3500;
         $waited = 0;
         $totalNew = 0;
-        $processedFiles = [];  // filename => mtime — чтобы перечитывать обновлённые файлы
+        $processedFiles = [];
 
         while ($waited < $maxWait) {
             sleep(5);
             $waited += 5;
 
+            clearstatcache();
             $alive = $pid && file_exists("/proc/{$pid}");
 
             // Читаем meta
@@ -100,14 +97,12 @@ class ParseReviewPageJob implements ShouldQueue
 
             foreach ($pageFiles as $pageFile) {
                 $fname = basename($pageFile);
-                $mtime = filemtime($pageFile);
+                $mtime = @filemtime($pageFile);
 
-                // Пропускаем если файл не изменился с прошлого чтения
                 if (isset($processedFiles[$fname]) && $processedFiles[$fname] >= $mtime) {
                     continue;
                 }
 
-                clearstatcache(true, $pageFile);
                 $raw = @file_get_contents($pageFile);
                 if (!$raw) continue;
 
@@ -143,39 +138,38 @@ class ParseReviewPageJob implements ShouldQueue
                 $anyNew = true;
 
                 if ($pageNew > 0) {
-                    Log::info("ParseReviewPageJob: file {$fname} → +{$pageNew} new");
+                    Log::info("ParseReviewPageJob: +{$pageNew} new from {$fname}");
                 }
             }
 
-            // Обновляем прогресс в БД
             if ($anyNew) {
                 $totalInDb = Review::where('organization_id', $orgId)->count();
                 $task->update([
                     'current_page' => count($processedFiles),
                     'total_parsed' => $totalInDb,
                 ]);
+                Log::info("ParseReviewPageJob: DB total={$totalInDb}");
             }
 
-            // Скрипт сообщил что готов
+            // Скрипт завершён
             if ($meta && !empty($meta['is_complete'])) {
-                Log::info("ParseReviewPageJob: script reports complete");
+                Log::info("ParseReviewPageJob: script complete");
                 break;
             }
 
             // Node процесс завершился
             if (!$alive) {
                 sleep(2);
+                clearstatcache();
                 // Дочитаем последние файлы
                 foreach (glob($cookieDir . '/batch__page_*.json') as $pageFile) {
                     $fname = basename($pageFile);
-                    $mtime = filemtime($pageFile);
+                    $mtime = @filemtime($pageFile);
                     if (isset($processedFiles[$fname]) && $processedFiles[$fname] >= $mtime) continue;
-
                     $raw = @file_get_contents($pageFile);
                     if (!$raw) continue;
                     $pageData = json_decode($raw, true);
                     if (!$pageData || empty($pageData['reviews'])) continue;
-
                     foreach ($pageData['reviews'] as $review) {
                         $reviewId = $review['id'] ?? $review['review_id']
                             ?? ('r_' . md5(($review['author'] ?? '') . ($review['text'] ?? '')));
@@ -192,17 +186,14 @@ class ParseReviewPageJob implements ShouldQueue
                     }
                     $processedFiles[$fname] = $mtime;
                 }
-                Log::info("ParseReviewPageJob: node process exited");
+                Log::info("ParseReviewPageJob: node exited");
                 break;
             }
 
-            // Лог прогресса каждые 30 секунд
             if ($waited % 30 === 0) {
                 $totalInDb = Review::where('organization_id', $orgId)->count();
                 Log::info("ParseReviewPageJob: progress", [
-                    'files' => count($processedFiles),
-                    'total_db' => $totalInDb,
-                    'waited' => $waited . 's',
+                    'files' => count($processedFiles), 'db' => $totalInDb, 'waited' => $waited,
                 ]);
             }
         }
@@ -211,9 +202,7 @@ class ParseReviewPageJob implements ShouldQueue
         if ($pid && file_exists("/proc/{$pid}")) {
             posix_kill((int)$pid, 15);
             sleep(2);
-            if (file_exists("/proc/{$pid}")) {
-                posix_kill((int)$pid, 9);
-            }
+            if (file_exists("/proc/{$pid}")) posix_kill((int)$pid, 9);
         }
         @unlink($pidFile);
 
@@ -223,14 +212,8 @@ class ParseReviewPageJob implements ShouldQueue
             'total_parsed' => $totalParsed,
             'total_pages' => count($processedFiles),
             'completed_at' => now(),
-            'next_run_at' => null,
-            'last_error' => null,
         ]);
 
-        Log::info("ParseReviewPageJob: COMPLETED", [
-            'task' => $task->id,
-            'total_parsed' => $totalParsed,
-            'total_new' => $totalNew,
-        ]);
+        Log::info("ParseReviewPageJob: DONE total={$totalParsed} new={$totalNew}");
     }
 }

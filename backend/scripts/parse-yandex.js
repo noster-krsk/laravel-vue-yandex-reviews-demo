@@ -75,12 +75,14 @@ const log = (msg) => process.stderr.write(msg + '\n');
     var orgData = { name: '', rating: 0, review_count: 0 };
 
     function saveProgress(allReviews, isComplete) {
+        // Сохраняем полные страницы
         while (lastSavedCount + PAGE_SIZE <= allReviews.length) {
             currentPageNum++;
             savePageToDisk(currentPageNum, allReviews.slice(lastSavedCount, lastSavedCount + PAGE_SIZE));
             lastSavedCount += PAGE_SIZE;
         }
-        if (isComplete && lastSavedCount < allReviews.length) {
+        // Сохраняем неполную страницу (partial flush) — чтобы PHP мог читать сразу
+        if (lastSavedCount < allReviews.length) {
             currentPageNum++;
             savePageToDisk(currentPageNum, allReviews.slice(lastSavedCount));
             lastSavedCount = allReviews.length;
@@ -499,7 +501,7 @@ const log = (msg) => process.stderr.write(msg + '\n');
                         dupeStreak = 0;
                     }
 
-                    if (p % 5 === 0) saveProgress(allReviews, false);
+                    saveProgress(allReviews, false);
                     await delay(2000 + Math.random() * 4000);
 
                 } catch(e) {
