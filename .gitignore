@@ -29,3 +29,7 @@ frontend/yarn-error.log*
 *.swo
 *~
 .DS_Store
+
+#не актуальное
+ParseYandexReviews.php
+YandexMapsParser.php
